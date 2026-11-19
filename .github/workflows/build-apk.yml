@@ -20,22 +20,30 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses || true
+        run: |
+          SDK_MGR="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDK_MGR" --licenses >/dev/null || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare build files and debug keystore
+      - name: Build Debug APK
         run: |
-          if [ ! -f .env.example ]; then
-            touch .env.example
+          if [ ! -f settings.gradle.kts ]; then
+            ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+            if [ -n "$ZIP_FILE" ]; then unzip -oq "$ZIP_FILE"; fi
           fi
+          SETTINGS_FILE=$(find . -maxdepth 3 -name "settings.gradle.kts" | head -n 1)
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "Error: settings.gradle.kts not found in repository!"
+            ls -la
+            exit 1
+          fi
+          cd "$(dirname "$SETTINGS_FILE")"
+          touch -a .env.example
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
           elif [ ! -f debug.keystore ]; then
@@ -44,12 +52,8 @@ jobs:
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
-
-      - name: Build Debug APK
-        run: gradle :app:assembleDebug --no-daemon
-
-      - name: Prepare named APK copy
-        run: cp app/build/outputs/apk/debug/app-debug.apk Smart-All-in-One.apk
+          gradle :app:assembleDebug --no-daemon -Pkotlin.incremental=false
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/Smart-All-in-One.apk"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
